@@ -4,55 +4,13 @@ This is a tiny distributed system done on one laptop using **two independent ser
 
 **Service A (Provider, localhost:8080)** exposes simple APIs: /health to show it’s running and a credential-based endpoint (POST /token) that returns a small, consistent JSON response (a deterministic token) with no database or persistent state. It also supports optional delay simulation (delay\_ms) to mimic a slow provider. 
 
-**Service B (Consumer, localhost:8081)**exposes one main endpoint (POST /protected-action) that accepts a request, calls Service A over HTTP using a strict timeout, and returns a **combined response** that includes both the consumer’s result (action \+ request\_id) and the provider’s output (token/user).
-
-The lab focuses on real distributed-system behavior: **network calls introduce latency and partial failures**. 
-
-We demonstrate this by (1) stopping Service A to show Service B returning **503** and logging a clear connection error, and (2) making Service A slow to trigger a **timeout**, where Service B logs a timeout error and returns **503** instead of hanging. Both services implement **basic request logging** with structured JSON lines containing service, endpoint, status, and latency\_ms, plus a shared request\_id to trace a single request across both services for debugging. This proves we can observe, diagnose, and handle failures across a service boundary.
+**Service B (Consumer, localhost:8081)** exposes one main endpoint (POST /protected-action) that accepts a request, calls Service A over HTTP using a strict timeout, and returns a **combined response** that includes both the consumer’s result (action \+ request\_id) and the provider’s output (token/user).
 
 Endpoints 
 
 Service A (8080): GET /health, POST /token, GET /metrics
 
 Service B (8081): GET /health, POST /protected-action, GET /metrics
-
-## **What Service A does (Provider on 8080\)**
-
-* Runs independently on 127.0.0.1:8080.  
-* Endpoints:  
-  * GET /health → returns {"status":"ok"} (quick liveness check).  
-  * POST /token → accepts JSON {"username": "...", "password": "...", "delay\_ms": optional}  
-    * If username/password match divya/pass123, returns {"token":"token-divya","user":"divya"}.  
-    * If not, returns **401** with {"error":"invalid credentials"}.  
-  * GET /metrics → returns simple counters like requests\_total, token\_requests.  
-* Extensions:  
-  * **delay\_ms** to simulate slowness (helps test timeouts).  
-  * **structured JSON logs** with service, endpoint, status, latency, request\_id.  
-  * **request\_id tracing** via X-Request-ID header.
-
-## **What Service B does (Consumer on 8081\)**
-
-* Runs independently on 127.0.0.1:8081.  
-* Endpoints:  
-  * GET /health → returns {"status":"ok"}.
-
-POST /protected-action → accepts JSON like:  
-{"username":"divya","password":"pass123","action":"ping","delay\_ms":2000,"retry":true}
-
-* Then:  
-  1. Calls Service A over the network (POST http://127.0.0.1:8080/token) using timeout=1.0.
-
-If provider succeeds, returns a **combined response** including consumer fields \+ provider fields:  
-{"consumer":"ok","action":"ping","user":"divya","token":"token-divya","request\_id":"..."}
-
-2.   
-   3. If provider fails (timeout / connection refused / unreachable), returns **503** and logs an **ERROR**.  
-   * GET /metrics → counters for requests, failures, retries, etc.  
-* Extensions:  
-  * **Timeout handling** (required): timeout=1.0 when calling provider.  
-  * **Retry once** (optional): retries on timeout/connection errors if enabled.  
-  * **structured JSON logs** \+ **request\_id tracing** (same ID appears in both services).  
-  * metrics counters for debugging.
 
 **How to run locally**
 
@@ -180,7 +138,7 @@ Service A logs
 {"service": "service-a", "endpoint": "POST /token", "status": 200, "latency\_ms": 305.39, "request\_id": "", "ts": "2026-02-04T16:10:02", "level": "INFO"}  
 127.0.0.1 \- \- \[04/Feb/2026 16:10:02\] "POST /token HTTP/1.1" 200 \-
 
-### **Force a “very slow” provider (for timeout testing in Service B later)**
+### **Force a “very slow” provider (What happens when there is a timeout? - Timeout testing for Service B)**
 
 curl \-i \-X POST "http://127.0.0.1:8080/token" \\  
   \-H "Content-Type: application/json" \\  
@@ -379,7 +337,7 @@ Logs
 
 ---
 
-## **6\) Test provider down / connection refused (stop A → B returns 503\)**
+## **6\) Test provider down / connection refused (What happens if Service A is down?\)**
 
 1. Stop Service A (Terminal 1): **Ctrl+C**  
 2. Now call B:
